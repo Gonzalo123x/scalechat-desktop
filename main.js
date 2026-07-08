@@ -16,15 +16,31 @@ const fs = require("node:fs");
 const QRCode = require("qrcode");
 const pino = require("pino");
 
-const baileys = require("@whiskeysockets/baileys");
-const makeWASocket = baileys.default;
-const {
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  DisconnectReason,
-  Browsers,
-  downloadMediaMessage,
-} = baileys;
+// Baileys se distribuye como ESM: en la app EMPAQUETADA, require() de un ESM falla
+// con ERR_REQUIRE_ESM. Por eso lo cargamos con import() DINÁMICO (que sí funciona
+// desde CommonJS) al arrancar, antes de conectar ningún número.
+let makeWASocket;
+let useMultiFileAuthState;
+let fetchLatestBaileysVersion;
+let DisconnectReason;
+let Browsers;
+let downloadMediaMessage;
+let baileysLoading = null;
+
+async function loadBaileys() {
+  if (makeWASocket) return; // ya cargado
+  if (!baileysLoading) {
+    baileysLoading = import("@whiskeysockets/baileys").then((b) => {
+      makeWASocket = b.default;
+      useMultiFileAuthState = b.useMultiFileAuthState;
+      fetchLatestBaileysVersion = b.fetchLatestBaileysVersion;
+      DisconnectReason = b.DisconnectReason;
+      Browsers = b.Browsers;
+      downloadMediaMessage = b.downloadMediaMessage;
+    });
+  }
+  await baileysLoading;
+}
 
 const logger = pino({ level: "silent" });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -158,6 +174,7 @@ async function executeActions(sock, jid, actions) {
 
 // ── Conexión de un perfil (número) ──────────────────────────────────────────
 async function startProfile(profile) {
+  await loadBaileys(); // Baileys (ESM) debe estar cargado antes de usarlo
   if (sockets.has(profile.id)) return; // ya conectado/conectando
   const dir = sessionDir(profile.id);
   fs.mkdirSync(dir, { recursive: true });
