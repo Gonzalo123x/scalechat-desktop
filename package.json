@@ -1,6 +1,6 @@
 {
   "name": "scalechat-desktop",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Conector de escritorio de Scalechat: conecta WhatsApp por QR (Baileys) desde tu PC — sin proxy — y responde con tus flujos de Scalechat.",
   "main": "main.js",
   "author": "Scale SAC",
@@ -26,7 +26,7 @@
   "build": {
     "appId": "app.scalechat.desktop",
     "productName": "Scalechat Desktop",
-    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "artifactName": "Scalechat-Desktop-Setup-${os}-${arch}.${ext}",
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -62,7 +62,8 @@
       {
         "provider": "github",
         "owner": "Gonzalo123x",
-        "repo": "scalechat-desktop"
+        "repo": "scalechat-desktop",
+        "releaseType": "release"
       }
     ]
   }
