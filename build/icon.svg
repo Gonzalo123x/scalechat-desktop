@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Ícono de marca (verde #44D67A / negro). Fuente vectorial: exporta a
+       build/icon.png (1024x1024) para que electron-builder genere .ico/.icns. -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#44D67A"/>
+      <stop offset="1" stop-color="#2FAE5F"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="#0a0a0a"/>
+  <rect x="96" y="96" width="832" height="832" rx="176" fill="url(#g)"/>
+  <text x="512" y="512" font-family="Arial, Helvetica, sans-serif" font-size="560"
+        font-weight="800" fill="#0a0a0a" text-anchor="middle" dominant-baseline="central">S</text>
+</svg>

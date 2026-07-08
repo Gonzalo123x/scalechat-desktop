@@ -46,11 +46,46 @@ En la ventana:
 
 ## Empaquetar instaladores (Fase 4)
 
+Los instaladores se generan en `dist/` con **electron-builder**.
+
 ```bash
-npm run dist        # SO actual
+npm install         # incluye electron-updater
+npm run dist        # instalador para el SO actual
 npm run dist:win    # Windows (.exe NSIS)
-npm run dist:mac    # macOS (.dmg)  — requiere firmar/notarizar para evitar avisos
+npm run dist:mac    # macOS (.dmg)
+npm run dist:linux  # Linux (AppImage)
 ```
+
+> Cada SO se compila en su propia plataforma (Windows en Windows, macOS en Mac).
+> Para las 3 a la vez sin tener las 3 máquinas, usa el CI (abajo).
+
+### Ícono de marca
+Exporta `build/icon.svg` a **`build/icon.png` (1024×1024)**. electron-builder
+genera solo el `.ico` (Windows) y `.icns` (macOS) a partir de ese PNG. Sin él,
+usa el ícono por defecto de Electron.
+
+### Firma de código (evita el aviso “app no verificada”)
+- **Windows**: consigue un certificado de firma de código (OV/EV). Exporta:
+  `CSC_LINK` (ruta o base64 del .pfx) y `CSC_KEY_PASSWORD`.
+- **macOS**: requiere cuenta de Apple Developer. Exporta `APPLE_ID`,
+  `APPLE_APP_SPECIFIC_PASSWORD` y `APPLE_TEAM_ID` (electron-builder notariza solo).
+- Sin firmar igual funciona para pruebas, pero el SO mostrará una advertencia.
+
+### Auto-actualización (electron-updater)
+La app busca versiones nuevas en **GitHub Releases** al abrir (solo empaquetada),
+las descarga y las instala al reiniciar. Para publicar una versión:
+
+1. Sube este repo a GitHub como **Gonzalo123x/scalechat-desktop** (privado o público).
+2. Sube el certificado/credenciales como *secrets* del repo (ver `.github/workflows/build.yml`).
+3. Sube la versión en `package.json` (p. ej. `0.1.1`), haz commit y crea un tag:
+   ```bash
+   git tag v0.1.1 && git push --tags
+   ```
+4. El workflow compila Win/Mac/Linux y publica el release. Los usuarios se
+   actualizan solos la próxima vez que abran la app.
+
+> ¿Prefieres no usar GitHub? Cambia `build.publish` a `{"provider":"generic","url":"https://TU-CDN/updates/"}`
+> (p. ej. tu bucket de R2) y sube ahí el contenido de `dist/` (incluido `latest.yml`).
 
 ## Notas
 

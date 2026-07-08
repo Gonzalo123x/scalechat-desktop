@@ -340,9 +340,32 @@ function createWindow() {
   mainWindow.webContents.on("did-finish-load", () => pushState());
 }
 
+// Auto-actualización: al abrir la app (solo empaquetada), busca una versión nueva
+// publicada en GitHub Releases, la descarga y la instala al reiniciar. Así los
+// usuarios reciben mejoras sin reinstalar a mano.
+function setupAutoUpdate() {
+  if (!app.isPackaged) return; // en desarrollo no se actualiza
+  try {
+    // Carga perezosa: electron-updater se instancia contra el 'app' de Electron
+    // (por eso solo se requiere aquí, ya con la app lista y empaquetada).
+    const { autoUpdater } = require("electron-updater");
+    autoUpdater.autoDownload = true;
+    autoUpdater.on("checking-for-update", () => log("Buscando actualizaciones…"));
+    autoUpdater.on("update-available", (i) => log(`Actualización disponible: ${i?.version ?? ""}`));
+    autoUpdater.on("update-not-available", () => log("La app está al día."));
+    autoUpdater.on("download-progress", (p) => log(`Descargando actualización: ${Math.round(p.percent)}%`));
+    autoUpdater.on("update-downloaded", () => log("Actualización lista: se instalará al reiniciar la app."));
+    autoUpdater.on("error", (e) => log(`Auto-update: ${e?.message ?? e}`));
+    autoUpdater.checkForUpdatesAndNotify();
+  } catch (e) {
+    log(`No se pudo iniciar la auto-actualización: ${e.message}`);
+  }
+}
+
 app.whenReady().then(() => {
   loadConfig();
   createWindow();
+  setupAutoUpdate();
   // Reanuda todas las sesiones guardadas.
   for (const p of profiles) startProfile(p).catch((e) => log(`No se pudo reanudar ${p.name}: ${e.message}`));
 

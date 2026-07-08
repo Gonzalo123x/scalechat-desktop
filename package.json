@@ -9,10 +9,13 @@
     "start": "electron .",
     "dist": "electron-builder",
     "dist:win": "electron-builder --win",
-    "dist:mac": "electron-builder --mac"
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "release": "electron-builder --publish always"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "6.7.23",
+    "electron-updater": "^6.3.9",
     "pino": "^9.5.0",
     "qrcode": "^1.5.4"
   },
@@ -23,9 +26,44 @@
   "build": {
     "appId": "app.scalechat.desktop",
     "productName": "Scalechat Desktop",
-    "files": ["**/*", "!**/sessions/**"],
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg", "category": "public.app-category.business" },
-    "linux": { "target": "AppImage" }
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!**/sessions/**",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.business",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Network"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Gonzalo123x",
+        "repo": "scalechat-desktop"
+      }
+    ]
   }
 }
