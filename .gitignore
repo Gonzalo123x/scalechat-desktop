@@ -1,0 +1,6 @@
+node_modules/
+dist/
+sessions/
+config.json
+*.log
+.DS_Store

@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scalechat Desktop</title>
+    <style>
+      :root {
+        --bg: #0b0b12;
+        --surface: #14141f;
+        --surface2: #1c1c2b;
+        --border: #2a2a3d;
+        --text: #e7e7f0;
+        --muted: #9a9ab0;
+        --primary: #7c5cff;
+        --accent: #22d3ee;
+        --green: #34d399;
+        --amber: #fbbf24;
+        --red: #f87171;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        font-size: 14px;
+      }
+      header {
+        display: flex; align-items: center; gap: 10px;
+        padding: 14px 18px; border-bottom: 1px solid var(--border);
+        background: linear-gradient(90deg, rgba(124,92,255,.12), rgba(34,211,238,.06));
+      }
+      header .logo {
+        width: 30px; height: 30px; border-radius: 8px;
+        background: linear-gradient(135deg, var(--primary), var(--accent));
+        display: flex; align-items: center; justify-content: center; font-weight: 700;
+      }
+      header h1 { font-size: 15px; margin: 0; }
+      header p { font-size: 11px; margin: 0; color: var(--muted); }
+      main { padding: 18px; display: grid; gap: 18px; }
+      .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; }
+      .card h2 { font-size: 13px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+      label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+      input {
+        width: 100%; height: 38px; padding: 0 10px; border-radius: 9px;
+        border: 1px solid var(--border); background: var(--bg); color: var(--text); outline: none;
+      }
+      input:focus { border-color: var(--primary); }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      button {
+        height: 38px; padding: 0 16px; border: none; border-radius: 9px; cursor: pointer;
+        font-weight: 600; color: white; background: linear-gradient(135deg, var(--primary), var(--accent));
+      }
+      button.ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+      button:disabled { opacity: .5; cursor: default; }
+      .err { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 16px; }
+      .profile { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+      .profile:first-child { border-top: none; }
+      .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+      .dot.CONNECTED { background: var(--green); box-shadow: 0 0 8px var(--green); }
+      .dot.CONNECTING, .dot.QR_PENDING { background: var(--amber); }
+      .dot.DISCONNECTED, .dot.ERROR { background: var(--red); }
+      .pname { font-weight: 600; }
+      .pmeta { font-size: 12px; color: var(--muted); }
+      .grow { flex: 1; min-width: 0; }
+      .qr { margin-top: 10px; text-align: center; }
+      .qr img { width: 220px; height: 220px; border-radius: 12px; background: white; padding: 8px; }
+      .qr p { font-size: 12px; color: var(--muted); }
+      .empty { color: var(--muted); font-size: 13px; text-align: center; padding: 20px 0; }
+      #log {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+        background: #07070d; border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+        height: 180px; overflow-y: auto; white-space: pre-wrap; color: var(--muted);
+      }
+      .hint { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.4; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="logo">S</div>
+      <div>
+        <h1>Scalechat Desktop</h1>
+        <p>Conecta WhatsApp por QR desde tu PC — sin proxy — y responde con tus flujos.</p>
+      </div>
+    </header>
+
+    <main>
+      <div class="card">
+        <h2>Añadir un número</h2>
+        <label>Nombre (para reconocerlo)</label>
+        <input id="name" placeholder="Ventas 1" />
+        <div class="row">
+          <div>
+            <label>URL de Scalechat</label>
+            <input id="apiUrl" value="https://dash.scalechat.app" />
+          </div>
+          <div>
+            <label>Token del dispositivo</label>
+            <input id="token" placeholder="pégalo desde Scalechat → Canales" />
+          </div>
+        </div>
+        <div style="margin-top: 12px; display: flex; gap: 10px; align-items: center;">
+          <button id="add">Añadir y conectar</button>
+          <span class="err" id="err"></span>
+        </div>
+        <p class="hint">
+          El <b>token</b> lo generas en Scalechat → Canales → “Conectar desde la app de escritorio”.
+          Cada número usa su propio token. La sesión se guarda en esta PC (no re-escanea al reabrir).
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>Mis números</h2>
+        <div id="profiles"><div class="empty">Aún no añadiste ningún número.</div></div>
+      </div>
+
+      <div class="card">
+        <h2>Registro</h2>
+        <div id="log"></div>
+      </div>
+    </main>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
