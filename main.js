@@ -51,6 +51,17 @@ let profiles = []; // [{ id, name, apiUrl, token }]
 const sockets = new Map(); // id -> WASocket
 const runtime = new Map(); // id -> { status, phone, qr, lastError }
 const reconnectTimers = new Map();
+// Guarda los mensajes SALIENTES por id: si el destinatario no descifra y pide un
+// "retry receipt", Baileys llama a getMessage y reenviamos desde aquí. CLAVE para
+// que los 1:1 se ENTREGUEN (si no, quedan en "Esperando este mensaje…").
+const sentStore = new Map(); // waMessageId -> message
+function rememberSent(sent) {
+  const id = sent && sent.key && sent.key.id;
+  if (id && sent.message) {
+    sentStore.set(id, sent.message);
+    if (sentStore.size > 300) sentStore.delete(sentStore.keys().next().value);
+  }
+}
 
 // ── Rutas de datos (persisten entre reinicios) ──────────────────────────────
 function userDir() {
@@ -154,17 +165,19 @@ async function executeActions(sock, jid, actions) {
         await sleep(Math.min(Math.max(Number(a.seconds) || 0, 0), 20) * 1000);
         await sock.sendPresenceUpdate("paused", jid);
       } else if (a.type === "text") {
-        if (a.body) await sock.sendMessage(jid, { text: a.body });
+        if (a.body) rememberSent(await sock.sendMessage(jid, { text: a.body }));
       } else if (a.type === "media") {
         const res = await fetch(a.url);
         if (!res.ok) throw new Error(`no se pudo descargar el medio (${res.status})`);
         const buf = Buffer.from(await res.arrayBuffer());
         const cap = a.caption || undefined;
-        if (a.kind === "image") await sock.sendMessage(jid, { image: buf, caption: cap });
-        else if (a.kind === "video") await sock.sendMessage(jid, { video: buf, caption: cap });
-        else if (a.kind === "audio") await sock.sendMessage(jid, { audio: buf, mimetype: "audio/mp4", ptt: true });
+        let sent;
+        if (a.kind === "image") sent = await sock.sendMessage(jid, { image: buf, caption: cap });
+        else if (a.kind === "video") sent = await sock.sendMessage(jid, { video: buf, caption: cap });
+        else if (a.kind === "audio") sent = await sock.sendMessage(jid, { audio: buf, mimetype: "audio/mp4", ptt: true });
         else if (a.kind === "document")
-          await sock.sendMessage(jid, { document: buf, fileName: a.filename || "archivo", caption: cap });
+          sent = await sock.sendMessage(jid, { document: buf, fileName: a.filename || "archivo", caption: cap });
+        rememberSent(sent);
       }
     } catch (e) {
       log(`Error enviando una acción (${a.type}): ${e.message}`);
@@ -189,6 +202,9 @@ async function startProfile(profile) {
     browser: Browsers.appropriate("Scalechat"),
     markOnlineOnConnect: false,
     syncFullHistory: false,
+    // Reenvía el contenido cuando el destinatario pide un retry (retry receipt).
+    // Necesario para que los 1:1 se ENTREGUEN (si no, "Esperando este mensaje…").
+    getMessage: async (key) => sentStore.get((key && key.id) || "") || undefined,
   });
   sockets.set(profile.id, sock);
 
@@ -245,14 +261,20 @@ async function startProfile(profile) {
     for (const msg of messages) {
       try {
         if (!msg.message || msg.key.fromMe) continue;
-        const jid = msg.key.remoteJid || "";
+        const remoteJid = msg.key.remoteJid || "";
         // Solo 1:1: ignoramos grupos y estados.
-        if (jid.endsWith("@g.us") || jid === "status@broadcast" || jid.endsWith("@broadcast")) continue;
+        if (remoteJid.endsWith("@g.us") || remoteJid === "status@broadcast" || remoteJid.endsWith("@broadcast")) continue;
 
         const content = extractInbound(msg);
         if (!content) continue;
 
-        const from = jid.split("@")[0].split(":")[0].replace(/\D/g, "");
+        // @lid = identificador ANÓNIMO de WhatsApp (no es el teléfono). El teléfono
+        // real viene en senderPn. Usamos el jid de teléfono para (a) mostrar el
+        // número correcto y (b) RESPONDER: WhatsApp entrega mejor al teléfono que
+        // al @lid (el @lid a veces "acepta" el envío pero no lo reparte).
+        const senderPn = msg.key.senderPn || "";
+        const replyJid = remoteJid.endsWith("@lid") && senderPn ? senderPn : remoteJid;
+        const from = replyJid.split("@")[0].split(":")[0].replace(/\D/g, "");
         if (!from) continue;
 
         let imageBase64, imageMediaType;
@@ -282,7 +304,7 @@ async function startProfile(profile) {
 
         if (actions?.length) {
           log(`[${profile.name}] → enviando ${actions.length} acción(es)`);
-          await executeActions(sock, jid, actions);
+          await executeActions(sock, replyJid, actions);
         }
       } catch (e) {
         log(`[${profile.name}] error procesando mensaje: ${e.message}`);
