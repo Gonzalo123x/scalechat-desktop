@@ -242,6 +242,7 @@ async function startProfile(profile) {
 
   sock.ev.on("connection.update", async (u) => {
     const { connection, lastDisconnect, qr } = u;
+    const prevStatus = runtime.get(profile.id)?.status;
 
     if (qr) {
       const dataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 300 });
@@ -272,10 +273,20 @@ async function startProfile(profile) {
         await postStatus(profile, { status: "DISCONNECTED", lastError: "Sesión cerrada desde el teléfono", phoneNumber: null, qr: null });
         log(`[${profile.name}] desconectado (logout). Vuelve a añadirlo para escanear.`);
       } else {
+        // ¿Estaba en fase de vinculación (mostrando QR) y cayó sin conectar nunca?
+        // Tras varios intentos así, casi siempre NO es la app: el número está
+        // restringido/baneado por WhatsApp, es un virtual marcado, o llegó al máximo
+        // de dispositivos vinculados (4). Lo decimos claro en vez de un bucle mudo.
+        const linking = prevStatus === "QR_PENDING";
+        const attempts = reconnectAttempts.get(profile.id) || 0;
+        const hint =
+          linking && attempts >= 2
+            ? `No se logra vincular (código ${code ?? "?"}). Escanea el QR pronto; si sigue fallando, ese número puede estar restringido por WhatsApp o tener 4 dispositivos vinculados — prueba con otro número.`
+            : `Reconectando… (código ${code ?? "?"})`;
         // Caída transitoria: reconectamos (sin re-escanear) con backoff que nunca muere.
-        setRuntime(profile.id, { status: "CONNECTING", lastError: `Reconectando… (código ${code ?? "?"})` });
-        await postStatus(profile, { status: "CONNECTING", lastError: `Reconectando… (${code ?? "?"})` });
-        log(`[${profile.name}] conexión caída (código ${code ?? "?"}), reintentando…`);
+        setRuntime(profile.id, { status: "CONNECTING", lastError: hint });
+        await postStatus(profile, { status: "CONNECTING", lastError: hint });
+        log(`[${profile.name}] ${linking ? "no vincula" : "conexión caída"} (código ${code ?? "?"}), reintentando…`);
         scheduleReconnect(profile);
       }
     }
