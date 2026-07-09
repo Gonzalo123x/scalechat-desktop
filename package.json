@@ -1,6 +1,6 @@
 {
   "name": "scalechat-desktop",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Conector de escritorio de Scalechat: conecta WhatsApp por QR (Baileys) desde tu PC — sin proxy — y responde con tus flujos de Scalechat.",
   "main": "main.js",
   "author": "Scale SAC",
@@ -47,12 +47,11 @@
       "createDesktopShortcut": true
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ],
       "category": "public.app-category.business",
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "identity": null
     },
     "linux": {
       "target": ["AppImage"],
