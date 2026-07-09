@@ -64,6 +64,26 @@ function rememberSent(sent) {
   }
 }
 
+// Mapa @lid → jid de teléfono. WhatsApp a veces entrega el chat con un identificador
+// ANÓNIMO (@lid) y el teléfono real viene en senderPn… pero NO siempre viene. Si no
+// viene y caemos al @lid, se crea un contacto basura (+22168…) y, peor, el MISMO
+// cliente queda partido en dos conversaciones (teléfono y @lid) con dos flujos
+// corriendo → respuestas duplicadas. Solución: cuando SÍ vemos el senderPn de un
+// @lid, lo recordamos aquí; si luego llega ese @lid sin senderPn, resolvemos al
+// teléfono ya conocido. Así un cliente = un teléfono = una conversación = un flujo.
+const lidToPhone = new Map(); // "<lid>@lid" -> "<phone>@s.whatsapp.net"
+// Dedup de mensajes ya procesados (Baileys puede reentregar el MISMO mensaje al
+// reconectar / sincronizar → doble procesamiento → respuestas duplicadas).
+const processedMsgIds = new Map(); // "<profileId>:<msgId>" -> timestamp
+function alreadyProcessed(profileId, msgId) {
+  if (!msgId) return false;
+  const key = `${profileId}:${msgId}`;
+  if (processedMsgIds.has(key)) return true;
+  processedMsgIds.set(key, Date.now());
+  if (processedMsgIds.size > 500) processedMsgIds.delete(processedMsgIds.keys().next().value);
+  return false;
+}
+
 // ── Rutas de datos (persisten entre reinicios) ──────────────────────────────
 function userDir() {
   return app.getPath("userData");
@@ -298,6 +318,8 @@ async function startProfile(profile) {
     for (const msg of messages) {
       try {
         if (!msg.message || msg.key.fromMe) continue;
+        // Evita procesar dos veces el mismo mensaje (reentrega al reconectar/sincronizar).
+        if (alreadyProcessed(profile.id, msg.key.id)) continue;
         const remoteJid = msg.key.remoteJid || "";
         // Solo 1:1: ignoramos grupos y estados.
         if (remoteJid.endsWith("@g.us") || remoteJid === "status@broadcast" || remoteJid.endsWith("@broadcast")) continue;
@@ -307,10 +329,22 @@ async function startProfile(profile) {
 
         // @lid = identificador ANÓNIMO de WhatsApp (no es el teléfono). El teléfono
         // real viene en senderPn. Usamos el jid de teléfono para (a) mostrar el
-        // número correcto y (b) RESPONDER: WhatsApp entrega mejor al teléfono que
-        // al @lid (el @lid a veces "acepta" el envío pero no lo reparte).
+        // número correcto, (b) RESPONDER (WhatsApp entrega mejor al teléfono que al
+        // @lid) y (c) NO partir al mismo cliente en dos conversaciones.
         const senderPn = msg.key.senderPn || "";
-        const replyJid = remoteJid.endsWith("@lid") && senderPn ? senderPn : remoteJid;
+        let replyJid;
+        if (remoteJid.endsWith("@lid")) {
+          if (senderPn) {
+            lidToPhone.set(remoteJid, senderPn); // aprende el teléfono de este @lid
+            replyJid = senderPn;
+          } else if (lidToPhone.has(remoteJid)) {
+            replyJid = lidToPhone.get(remoteJid); // ya lo conocíamos de antes
+          } else {
+            replyJid = remoteJid; // aún no sabemos el teléfono (raro): último recurso
+          }
+        } else {
+          replyJid = remoteJid; // ya es un jid de teléfono
+        }
         const from = replyJid.split("@")[0].split(":")[0].replace(/\D/g, "");
         if (!from) continue;
 
