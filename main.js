@@ -51,6 +51,7 @@ let profiles = []; // [{ id, name, apiUrl, token }]
 const sockets = new Map(); // id -> WASocket
 const runtime = new Map(); // id -> { status, phone, qr, lastError }
 const reconnectTimers = new Map();
+const reconnectAttempts = new Map(); // id -> nº de reintentos seguidos (para backoff)
 // Guarda los mensajes SALIENTES por id: si el destinatario no descifra y pide un
 // "retry receipt", Baileys llama a getMessage y reenviamos desde aquí. CLAVE para
 // que los 1:1 se ENTREGUEN (si no, quedan en "Esperando este mensaje…").
@@ -186,29 +187,58 @@ async function executeActions(sock, jid, actions) {
 }
 
 // ── Conexión de un perfil (número) ──────────────────────────────────────────
+// Programa un reintento de conexión con backoff (2.5s → tope 30s). NUNCA muere:
+// cada intento fallido vuelve a programar el siguiente. Es la ÚNICA vía de reintento
+// para que un número caído siempre vuelva solo (antes, si el reintento fallaba, el
+// número quedaba muerto hasta reconectar a mano).
+function scheduleReconnect(profile, delayMs) {
+  if (reconnectTimers.has(profile.id)) return; // ya hay uno en cola
+  let delay = delayMs;
+  if (delay == null) {
+    const n = (reconnectAttempts.get(profile.id) || 0) + 1;
+    reconnectAttempts.set(profile.id, n);
+    delay = Math.min(2500 * Math.pow(1.6, n - 1), 30000);
+  }
+  log(`[${profile.name}] reintento en ${Math.round(delay / 1000)}s…`);
+  const t = setTimeout(() => {
+    reconnectTimers.delete(profile.id);
+    if (profiles.find((p) => p.id === profile.id)) {
+      startProfile(profile).catch(() => {}); // startProfile maneja y reprograma sus errores
+    }
+  }, delay);
+  reconnectTimers.set(profile.id, t);
+}
+
 async function startProfile(profile) {
-  await loadBaileys(); // Baileys (ESM) debe estar cargado antes de usarlo
   if (sockets.has(profile.id)) return; // ya conectado/conectando
-  const dir = sessionDir(profile.id);
-  fs.mkdirSync(dir, { recursive: true });
-  const { state, saveCreds } = await useMultiFileAuthState(dir);
-  const { version } = await fetchLatestBaileysVersion();
+  try {
+    await loadBaileys(); // Baileys (ESM) debe estar cargado antes de usarlo
+    const dir = sessionDir(profile.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const { state, saveCreds } = await useMultiFileAuthState(dir);
+    // La versión es un "nice to have": si la red falla al consultarla, seguimos con
+    // la versión embebida de Baileys en vez de tirar todo el arranque (esto tumbaba
+    // la reconexión).
+    let version;
+    try {
+      ({ version } = await fetchLatestBaileysVersion());
+    } catch {}
 
-  setRuntime(profile.id, { status: "CONNECTING", lastError: null });
-  const sock = makeWASocket({
-    version,
-    auth: state,
-    logger,
-    browser: Browsers.appropriate("Scalechat"),
-    markOnlineOnConnect: false,
-    syncFullHistory: false,
-    // Reenvía el contenido cuando el destinatario pide un retry (retry receipt).
-    // Necesario para que los 1:1 se ENTREGUEN (si no, "Esperando este mensaje…").
-    getMessage: async (key) => sentStore.get((key && key.id) || "") || undefined,
-  });
-  sockets.set(profile.id, sock);
+    setRuntime(profile.id, { status: "CONNECTING", lastError: null });
+    const sock = makeWASocket({
+      version,
+      auth: state,
+      logger,
+      browser: Browsers.appropriate("Scalechat"),
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      // Reenvía el contenido cuando el destinatario pide un retry (retry receipt).
+      // Necesario para que los 1:1 se ENTREGUEN (si no, "Esperando este mensaje…").
+      getMessage: async (key) => sentStore.get((key && key.id) || "") || undefined,
+    });
+    sockets.set(profile.id, sock);
 
-  sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (u) => {
     const { connection, lastDisconnect, qr } = u;
@@ -222,6 +252,7 @@ async function startProfile(profile) {
 
     if (connection === "open") {
       const phone = (sock.user?.id || "").split(":")[0].split("@")[0];
+      reconnectAttempts.delete(profile.id); // conexión OK: reinicia el backoff
       setRuntime(profile.id, { status: "CONNECTED", qr: null, phone, lastError: null });
       await postStatus(profile, { status: "CONNECTED", phoneNumber: phone, qr: null, lastError: null });
       log(`[${profile.name}] CONECTADO (${phone}).`);
@@ -233,6 +264,7 @@ async function startProfile(profile) {
       const loggedOut = code === DisconnectReason.loggedOut;
       if (loggedOut) {
         // Sesión cerrada desde el teléfono: limpiamos credenciales y pedimos QR nuevo.
+        reconnectAttempts.delete(profile.id);
         try {
           fs.rmSync(dir, { recursive: true, force: true });
         } catch {}
@@ -240,17 +272,11 @@ async function startProfile(profile) {
         await postStatus(profile, { status: "DISCONNECTED", lastError: "Sesión cerrada desde el teléfono", phoneNumber: null, qr: null });
         log(`[${profile.name}] desconectado (logout). Vuelve a añadirlo para escanear.`);
       } else {
-        // Caída transitoria: reconectamos (sin re-escanear).
+        // Caída transitoria: reconectamos (sin re-escanear) con backoff que nunca muere.
         setRuntime(profile.id, { status: "CONNECTING", lastError: `Reconectando… (código ${code ?? "?"})` });
         await postStatus(profile, { status: "CONNECTING", lastError: `Reconectando… (${code ?? "?"})` });
         log(`[${profile.name}] conexión caída (código ${code ?? "?"}), reintentando…`);
-        clearTimeout(reconnectTimers.get(profile.id));
-        reconnectTimers.set(
-          profile.id,
-          setTimeout(() => {
-            if (profiles.find((p) => p.id === profile.id)) startProfile(profile).catch(() => {});
-          }, 2500),
-        );
+        scheduleReconnect(profile);
       }
     }
   });
@@ -311,11 +337,20 @@ async function startProfile(profile) {
       }
     }
   });
+  } catch (e) {
+    // Falla al ARRANCAR (red al pedir versión, auth, etc.): antes esto tumbaba el
+    // reintento y el número quedaba muerto. Ahora reprogramamos siempre.
+    sockets.delete(profile.id);
+    setRuntime(profile.id, { status: "CONNECTING", lastError: `Reintentando… (${e.message})` });
+    log(`[${profile.name}] error al iniciar: ${e.message}; reintentando…`);
+    scheduleReconnect(profile);
+  }
 }
 
 function stopProfile(id) {
   clearTimeout(reconnectTimers.get(id));
   reconnectTimers.delete(id);
+  reconnectAttempts.delete(id);
   const sock = sockets.get(id);
   try {
     sock?.end(undefined);
@@ -355,7 +390,18 @@ ipcMain.handle("profiles:remove", async (_e, id) => {
 });
 ipcMain.handle("profiles:reconnect", async (_e, id) => {
   const p = profiles.find((x) => x.id === id);
-  if (p) startProfile(p).catch(() => {});
+  if (p) {
+    // Fuerza: corta lo que haya (socket colgado o reintento en cola) y reintenta ya.
+    clearTimeout(reconnectTimers.get(id));
+    reconnectTimers.delete(id);
+    reconnectAttempts.delete(id);
+    const s = sockets.get(id);
+    try {
+      s?.end(undefined);
+    } catch {}
+    sockets.delete(id);
+    startProfile(p).catch(() => {});
+  }
   return { ok: true };
 });
 
@@ -407,6 +453,34 @@ app.whenReady().then(() => {
   setupAutoUpdate();
   // Reanuda todas las sesiones guardadas.
   for (const p of profiles) startProfile(p).catch((e) => log(`No se pudo reanudar ${p.name}: ${e.message}`));
+
+  // Vigilante (watchdog): cada 45s revisa que cada número que DEBERÍA estar
+  // conectado lo esté. Si alguno quedó caído sin socket ni reintento en cola (p. ej.
+  // un fallo raro que se escapó del backoff), lo levanta. Es la red de seguridad
+  // final para que NUNCA haya que reconectar a mano.
+  setInterval(() => {
+    for (const p of profiles) {
+      const st = runtime.get(p.id)?.status;
+      if (st === "CONNECTED" || st === "QR_PENDING") continue;
+      if (sockets.has(p.id) || reconnectTimers.has(p.id)) continue;
+      log(`[${p.name}] vigilante: sin conexión, reintentando…`);
+      scheduleReconnect(p, 1000);
+    }
+  }, 45000);
+
+  // Al reanudar la PC (salir de suspensión) o desbloquear la pantalla, los sockets
+  // suelen estar muertos: forzamos una revisión inmediata para reconectar rápido.
+  try {
+    const { powerMonitor } = require("electron");
+    const wake = () => {
+      log("PC reanudada: revisando conexiones…");
+      for (const p of profiles) {
+        if (!sockets.has(p.id) && !reconnectTimers.has(p.id)) scheduleReconnect(p, 1000);
+      }
+    };
+    powerMonitor.on("resume", wake);
+    powerMonitor.on("unlock-screen", wake);
+  } catch {}
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
