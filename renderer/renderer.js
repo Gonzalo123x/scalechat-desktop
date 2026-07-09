@@ -26,7 +26,14 @@ function render(list) {
         <div class="pmeta">${STATUS_LABEL[p.status] || p.status} · ${escapeHtml(meta)}</div>
         ${
           p.status === "QR_PENDING" && p.qr
-            ? `<div class="qr"><img src="${p.qr}" alt="QR" /><p>Abre WhatsApp → Dispositivos vinculados → Vincular un dispositivo</p></div>`
+            ? `<div class="qr"><img src="${p.qr}" alt="QR" /><p>Abre WhatsApp → Dispositivos vinculados → Vincular un dispositivo</p></div>
+        <div class="tips warn">
+          <div class="tips-title">⚡ Escanéalo rápido: el QR se renueva cada ~20 segundos.</div>
+          <ul>
+            <li>Si no conecta, revisa <b>WhatsApp → Dispositivos vinculados</b> y borra los viejos (máx. 4).</li>
+            <li>Si sigue sin vincular (código 400), ese número puede estar <b>restringido por WhatsApp</b>. Prueba con otro número con antigüedad/uso real.</li>
+          </ul>
+        </div>`
             : ""
         }
       </div>
